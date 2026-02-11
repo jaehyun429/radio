@@ -79,7 +79,7 @@ else:
     # 날짜(YYYYMMDD)만 입력받은 경우 (기본 설정)
     DATE = INPUT_ARG
     # ★ 주의: 본인 환경에 맞게 baechulsu 또는 jeongeunim 수정 필요 ★
-    BASE_DIR = f"/mnt/home_dnlab/sypark/radio2/jeongeunim/{DATE}"
+    BASE_DIR = f"/mnt/home_dnlab/jhjung/radio/baechulsu/{DATE}"
     AUDIO_FILE = f"{BASE_DIR}/mp3/{DATE}.mp3"
     OUTPUT_DIR = f"{BASE_DIR}/transcript"
 
@@ -134,7 +134,6 @@ segments, info = model.transcribe(
     ),
 
     no_speech_threshold=0.3,         
-    initial_prompt="정은임의 영화음악 라디오 방송 전사입니다.",
     condition_on_previous_text=True, 
     word_timestamps=True
 )
