@@ -1,5 +1,11 @@
 # Hybrid Role-Aware Structural Modeling and Semantic Extraction for Long-Form Radio Broadcasts
 
+## Output Example
+
+**방송사별 타임라인**
+![KBS, MBC, SBS 3사 타임라인](Radio_result.png)
+
+
 > **Interspeech 2026 제출 논문** | Chungnam National University, Data Network Research Lab
 [![Paper](https://img.shields.io/badge/Paper-Interspeech%202026-blue?style=flat-square)](./paper/interspeech2026.pdf)
 KBS·MBC·SBS 라디오 방송 **30일(50시간, 21,555 세그먼트)** 대상으로 DJ / 음악 / 광고 블록을 자동 구조화하고 LLM 기반 메타데이터를 추출하는 하이브리드 파이프라인입니다.
