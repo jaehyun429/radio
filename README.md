@@ -1,5 +1,12 @@
 # Hybrid Role-Aware Structural Modeling and Semantic Extraction for Long-Form Radio Broadcasts
 
+
+## Authors
+- 정재현 (담당: DJ 블록 분류 — 휴리스틱 기반 화자 역할 앵커링, DJ 사연 LLM 요약)
+- 박경서 (담당: 음악 블록 분류 알고리즘)
+- 박소윤 (담당: 광고 블록 분류)
+- 이영석 (지도교수)
+
 ## Output Example
 
 **방송사별 타임라인**
