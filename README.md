@@ -1,77 +1,123 @@
-# Automatic Structuring of Radio Broadcast Streams
+# Hybrid Role-Aware Structural Modeling and Semantic Extraction for Long-Form Radio Broadcasts
 
-This repository contains the implementation for our paper submitted to Interspeech 2026.
-
-> **Anonymous submission** — author information withheld for double-blind review.
-
----
-
-## Overview
-
-We propose a system for automatically segmenting radio broadcast audio into four semantic categories: **DJ talk/Guest talk**, **Music**, and **Advertisement**. The system combines a speaker-diarization-based baseline with two complementary modules that improve music and advertisement detection.
-
-### Pipeline
-
-```
-
-Preprocessed Audio (.mp3)
-    |
-    v
-[1. ASR + Speaker Diarization]  (WhisperX)
-    |
-    v
-[2. Baseline Labeling]          ('DJ/GUEST'/MUSIC/AD via speaker statistics)
-    |
-    +---> [3. Music Detection]  (Audio acoustic features: dB, RMS..)
-    |
-    +---> [4. Ad Detection]      (Audio fingerprinting: Panako)
-                |
-                +---> [5. Individual Ad Identification]  (LLM: GPT-4o)
-```
+> **Interspeech 2026 제출 논문** | Chungnam National University, Data Network Research Lab
+[![Paper](https://img.shields.io/badge/Paper-Interspeech%202026-blue?style=flat-square)](./paper/interspeech2026.pdf)
+KBS·MBC·SBS 라디오 방송 **30일(50시간, 21,555 세그먼트)** 대상으로 DJ / 음악 / 광고 블록을 자동 구조화하고 LLM 기반 메타데이터를 추출하는 하이브리드 파이프라인입니다.
 
 ---
 
-## Method
+## Results
 
-### Stage 0 - Preprocessing data
-Vocals only, Musics only
+| Block | Precision | Recall | F1 |
+|-------|-----------|--------|----|
+| DJ | 0.91 | 0.92 | **0.91** |
+| Music | 0.91 | 0.89 | **0.90** |
+| Advertisement | 0.91 | 0.88 | **0.88** |
 
+- 광고 블록 F1: baseline 0.62 → proposed **0.88** (+0.26)
+- 개별 광고 단위 F1: **0.93**
+- DJ 요약 품질 (human eval, 5점 만점): **4.42 / 5**
+- 광고 entity 추출 F1 (company or product): **0.78**
 
-### Stage 1 & 2 — Baseline (Speaker-Diarization-Based Labeling)
+---
 
-**`dj/whisperX.py`** — Runs WhisperX (large-v3) with speaker diarization on the raw broadcast audio, producing a time-stamped transcript with per-segment speaker IDs.
+## Pipeline Overview
 
-**`dj/speaker_ratio.py`** — Parses the WhisperX output into a structured CSV. Gaps of 100 seconds or more between speech segments are inserted as `Music` segments.
+```
+Radio MP3 (KBS / MBC / SBS)
+        │
+        ▼
+[1. VAD + ASR + Speaker Diarization]  ← WhisperX
+        │
+        ▼
+[2. DJ Block Detection]               ← Speaker role anchoring
+        │
+        ├──▶ [3. Music Block Detection]     ← Acoustic features (RMS, dB)
+        │
+        └──▶ [4. AD Block Detection]        ← Cross-day audio fingerprinting (Panako)
+                        │
+                        ▼
+             [5. Semantic Extraction]       ← GPT-4o (DJ summary / Music metadata / AD entities)
+```
 
-**`dj/dj_stat.py`** — Labels each segment using the following heuristics:
-- **DJ**: Among the top-3 speakers by total duration (excluding those appearing in the first 2 seconds, which are typically time-signal or pre-roll), the one who speaks earliest is identified as the DJ.
-- **GUEST**: Speakers who alternate turns with the DJ at least 20 times (or above a relative threshold).
-- **MUSIC**: Segments inserted from long silence gaps (>= 100 s).
-- **AD**: All remaining unlabeled segments.
+---
 
-**`dj/merge_block.py`** — Merges consecutive same-type segments into blocks. Adjacent DJ and GUEST segments are merged into `DJ/GUEST` blocks.
+## Key Methods
 
-### Stage 3 — Music detection (Audio Feature-Based)
+### DJ Block Detection
+화자 분리(pyannote) 결과를 기반으로 프로그램 호스트를 글로벌 구조적 앵커로 식별.
+- 누적 발화 시간 $T_i$ 및 오프닝 구간 발화 비율 $O_i$로 DJ 판별
+- DJ 세그먼트를 먼저 확정하여 이후 단계의 분류 정밀도 향상
 
-The 100-second gap heuristic in the baseline misses short music segments and is sensitive to speech-over-music. This module operates on source-separated audio (music stem and vocal stem, e.g. via Demucs) to detect music regions more accurately.
+### Music vs. Advertisement 분리
+- 보컬/음악 에너지 차이, 에너지 드롭 구간(3초 단위 이동평균)으로 음악 블록 필터링
+- 최소 유효 길이(≥100s) 조건 추가 적용
 
-**`music/detect_selection_music.py`** — `SelectionMusicDetector` runs a 4-step pipeline:
-1. **High-energy detection**: computes RMS energy on the music stem; frames above -38 dB are marked as candidates.
-2. **Segment merging**: adjacent candidate segments within a 20-second gap are merged.
-3. **Duration filter**: merged segments shorter than 60 seconds are discarded.
-4. **Vocal/music refinement**: for each remaining segment, per-frame RMS is compared between the vocal and music stems. Frames where music is active and vocals are absent (instrumental) or closely mixed (singing) are retained. Segments passing a 70% smoothed validity threshold and lasting at least 100 seconds are emitted as final music intervals, saved to `{date}-selection_music.csv`.
+### Cross-Day Audio Fingerprinting (AD Detection)
+- Panako로 전날 방송 대비 반복 등장 구간 매칭
+- 클립 길이 20s / 스텝 3s / 매칭 스코어 임계값 100 / 병합 갭 30s
+- baseline precision 0.50 → **0.91** 달성
 
-**`music/extract_playlist.py`** — Uses GPT-4o to extract song title and artist information by analyzing DJ talk context (up to 400 s window) surrounding each detected music block. Handles ASR transcription errors via prompt-level correction rules.
+### LLM-based Semantic Extraction (GPT-4o)
+- DJ 블록: 대화 주제 및 요약 생성
+- 음악 블록: 곡명·아티스트 추출 (F1 0.70)
+- 광고 블록: 브랜드·제품명 추출 (F1 0.78)
 
-**`music/auto_eval.py`** — Batch runner: iterates over a date range and calls `extract_playlist.py` for each date that has a `selection_music.csv` present.
+---
 
-**`music/evaluate_music_blocks.py`** / **`music/evaluate_music_overall_all.py`** — Evaluation scripts comparing detected music intervals against manually annotated ground truth (SBS, KBS, MBC) using IoU-based metrics.
+## Dataset
 
-### Stage 4 — Advertisement Detection (Audio Fingerprinting)
+| 방송사 | 장르 | 수집일 | 총 시간 | 세그먼트 수 |
+|--------|------|--------|---------|------------|
+| KBS | K-Pop | 10일 | 20h | 8,256 |
+| MBC | Pop | 10일 | 20h | 8,645 |
+| SBS | 영화음악 | 10일 | 10h | 4,654 |
+| **합계** | | **30일** | **50h** | **21,555** |
 
-**`ad/cluster-max.py`** — Clusters candidate clips into ad blocks. Clips within a 30-second gap are merged into the same cluster.
+> 저작권 제한으로 원본 오디오는 미포함. Ground truth 샘플 및 평가 결과는 `data_sample/AD/`에 포함.
 
-**`ad/whisper_ad_faster.py`** — Transcribes detected ad clips using faster-whisper to enable product-name-level identification.
+---
+
+## Repository Structure
+
+```
+├── ad/
+│   ├── seg-lookup.py              # Panako 쿼리 (cross-day 매칭)
+│   ├── cluster-max.py             # 매칭 결과 클러스터링 → AD 블록
+│   ├── whisper_ad_faster.py       # 감지된 광고 클립 전사
+│   ├── evaluate_individual_ads.py # 감지 + entity 추출 평가
+│   ├── evaluate_ad_block_baseline.py
+│   └── make_radio_timeline.py     # DJ/Music/AD 타임라인 시각화
+├── data_sample/
+│   └── AD/
+│       ├── input/  {KBS,MBC,SBS}/{date}-truth_block.csv
+│       └── output/results/
+└── requirements.txt
+```
+
+---
+
+## Usage
+
+```bash
+# Step 1: Panako 쿼리 (전날 인덱스 대비 당일 클립 매칭)
+python ad/seg-lookup.py /data/baechulsu/20241125/clips/ 20241124
+
+# Step 2: 매칭 결과 → AD 블록 클러스터링
+python ad/cluster-max.py 20241125-20241124-compare.csv --gap_threshold 30
+
+# Step 3: 감지된 광고 클립 전사 (선택)
+python ad/whisper_ad_faster.py \
+    --input 20241125-20241124-compare-ad-result.csv \
+    --output 20241125-20241124-compare-ad-whisper.csv
+
+# Step 4: 평가 (감지 + entity 추출)
+python ad/evaluate_individual_ads.py --broadcaster baechulsu --date 20241125
+python ad/evaluate_individual_ads.py --broadcaster all
+
+# Step 5: 타임라인 시각화
+python ad/make_radio_timeline.py
+```
 
 ---
 
@@ -81,78 +127,15 @@ The 100-second gap heuristic in the baseline misses short music segments and is 
 pip install -r requirements.txt
 ```
 
-External dependencies:
-- [WhisperX](https://github.com/m-bain/whisperX)
-- [Panako](https://github.com/JorenSix/Panako) (audio fingerprinting)
+External:
+- [Panako](https://github.com/JorenSix/Panako) — 오디오 핑거프린팅 (별도 설치 및 인덱싱 필요)
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
-- HuggingFace token for pyannote speaker diarization
-
----
-
-## Setup
+- OpenAI API key (entity 추출용)
 
 ```bash
-# Required environment variables
 export RADIO_DATA_ROOT=/path/to/your/broadcast/data
-export HF_TOKEN=your_huggingface_token
-export OPENAI_API_KEY=your_openai_key   # only for playlist extraction
+export OPENAI_API_KEY=your_openai_key
 ```
-
-Expected data directory structure:
-```
-$RADIO_DATA_ROOT/
-└── {YYYYMMDD}/
-    ├── mp3/
-    │   └── {YYYYMMDD}.mp3
-    └── transcript/          # outputs written here
-```
-
----
-
-## Usage
-
-```bash
-# Stage 1: ASR + diarization
-python dj/whisperX.py 20241124
-
-# Stage 2: Parse to CSV
-python dj/speaker_ratio.py 20241124
-
-# Stage 2: Baseline labeling
-python dj/dj_stat.py 20241124
-
-# Stage 2: Merge into blocks
-python dj/merge_block.py 20241124
-
-# Stage 4: Ad detection (Panako must be indexed beforehand)
-python ad/detector.py --date 20241124 --input-dir /path/to/clips/
-
-# Stage 4: Cluster ad results
-python ad/cluster-max.py panako_clips_20241124.csv
-
-# Stage 5: Playlist extraction (requires OpenAI key)
-python music/extract_playlist.py MBC 20241124
-```
-
----
-
-## Data
-
-Sample outputs for 30 broadcast episodes (KBS, MBC, SBS) are provided in `data_sample`.
-
-The raw audio files are not included due to copyright restrictions.
-
-<img width="3600" height="500" alt="image" src="https://github.com/user-attachments/assets/5770cd80-83f4-4974-8741-3fbf2ce066c6" />
-<img width="3600" height="500" alt="image" src="https://github.com/user-attachments/assets/aa8b132e-04da-4c51-8299-6699de6c1a37" />
-<img width="3600" height="500" alt="image" src="https://github.com/user-attachments/assets/d79bd1e3-1e01-479d-9ae1-bf7a686edd5f" />
-
-
-
-
-<img width="2969" height="2059" alt="image" src="https://github.com/user-attachments/assets/29f4ede9-80c7-4f57-b179-717fe4a494b9" />
-<img width="2969" height="2059" alt="image" src="https://github.com/user-attachments/assets/2e01fbeb-eaf5-41d9-bf7f-44176a44f1bf" />
-
-
 
 ---
 
